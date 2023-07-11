@@ -1,12 +1,13 @@
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        required: true
-        type: string
+  push:
+    branches:
+      - '*'
+    tags:
+      - '*'
 
 jobs:
   update:
+    if: contains(github.ref, 'tags')
     runs-on: ubuntu-latest
     steps:
     - name: configure git
@@ -18,17 +19,17 @@ jobs:
       with:
         path: target
         fetch-depth: 0
-        token: ${{ secrets.GH_TOKEN }}
     - name: clone runbooks
       uses: actions/checkout@v2
       with:
         path: runbooks
         repository: deadsnakes/runbooks
     - name: pull upstream
-      run: runbooks/import-upstream --repo target ${{ github.event.inputs.version }}
+      run: runbooks/import-upstream --repo target ${{ github.ref_name }}
   build:
     needs: update
     runs-on: ubuntu-latest
+    if: contains(github.ref, 'tags')
     strategy:
       matrix:
         include:
@@ -46,7 +47,6 @@ jobs:
       with:
         path: target
         fetch-depth: 0
-        token: ${{ secrets.GH_TOKEN }}
     - name: clone runbooks
       uses: actions/checkout@v2
       with:
@@ -69,5 +69,21 @@ jobs:
       run: mkdir dist && cd target && ../runbooks/build
     - name: test
       run: runbooks/quick-test --distrib-codename ${{ matrix.name }} --dist-dir dist --src-dir target
-    - name: release
-      run: cd target && ../runbooks/release
+    - name: create all-in-one tar
+      run: tar -czvf dist/python-${{ github.ref_name }}-${{ matrix.name }}-amd64-all-in-one.tar dist/*.deb
+    - name: check files
+      run: ls -lah dist target
+    - uses: actions/upload-artifact@v3
+      with:
+        name: python-${{ github.ref_name }}-${{ matrix.name }}-amd64-all-in-one.tar
+        path: dist/python-${{ github.ref_name }}-${{ matrix.name }}-amd64-all-in-one.tar
+    - uses: xresloader/upload-to-github-release@v1
+      name: upload files to release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        file: |-
+          dist/python-${{ github.ref_name }}-${{ matrix.name }}-amd64-all-in-one.tar; dist/*.deb
+        tags: true
+        draft: false
+        overwrite: true
